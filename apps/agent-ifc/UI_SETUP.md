@@ -91,6 +91,22 @@ to the App's separate service principal. The trace permission failure is separat
 from the disabled MCP feature; disabling traces would hide the audit trail rather
 than fix either connection.
 
+If the SDK reports only `OperationFailed: ... MessageStatus.FAILED`, it means
+Genie accepted the request but failed during processing. That status alone does
+not identify a connection, permissions, SQL or warehouse issue. The adapter now
+uses the SDK waiter callback to retain Genie's `error.type`, conversation ID and
+message ID before the waiter raises its generic error. Recognized schema,
+warehouse, SQL, rate-limit and timeout categories receive specific guidance;
+unknown categories remain unknown. A redacted detailed reason goes to App Logs.
+
+For the confirmed `USE SCHEMA` failure in the supplied App logs, open Databricks
+**SQL Editor > New query** as an owner/admin and run the grant script above. Its
+final `SHOW GRANTS` statements verify the App's client ID. These grants are not
+executed by committing code or deploying From Git. Separately, open the existing
+Genie Agent's **Settings**, identify its SQL warehouse, and ensure this same App
+service principal has **Can use** on that warehouse. Re-test a small portfolio
+query before requesting the full recommendation analysis.
+
 References: [native Genie API](https://docs.databricks.com/aws/en/genie-agents/conversation-api),
 [Genie App resources](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/genie),
 [MLflow App resources](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/mlflow).

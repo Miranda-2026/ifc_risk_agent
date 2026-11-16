@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from agent_server.connection_errors import classify_connection_error
+from agent_server.connection_errors import classify_connection_error, classify_genie_message_error, redact_error_detail
 
 
 class ConnectionErrorTest(unittest.TestCase):
@@ -49,6 +49,25 @@ class ConnectionErrorTest(unittest.TestCase):
                 raise AssertionError("Exception text must not be read")
         self.assertEqual(classify_connection_error(PrivateError()).code, "CONNECTION_FAILED")
         self.assertEqual(classify_connection_error(RuntimeError("Secret contains 403")).code, "CONNECTION_FAILED")
+
+    def test_genie_error_categories_do_not_conflate_sql_and_permissions(self):
+        warehouse = classify_genie_message_error("WAREHOUSE_ACCESS_MISSING_EXCEPTION")
+        self.assertIn("Can use", warehouse.message)
+        schema = classify_genie_message_error("COULD_NOT_GET_UC_SCHEMA_EXCEPTION")
+        self.assertIn("USE SCHEMA", schema.message)
+        sql = classify_genie_message_error("SQL_EXECUTION_EXCEPTION")
+        self.assertIn("query failed", sql.message)
+        unknown = classify_genie_message_error("UNRECOGNIZED_ERROR")
+        self.assertEqual(unknown.code, "GENIE_QUERY_FAILED")
+        self.assertIn("cause is not yet identified", unknown.message)
+
+    def test_server_reason_omits_credentials_urls_and_config(self):
+        value = 'Schema denied; token=SECRET_A client_secret="SECRET B" Authorization: Bearer SECRET_C https://example.test?signature=SECRET_D Config: secret=SECRET_E'
+        redacted = redact_error_detail(value)
+        for secret in ["SECRET_A", "SECRET B", "SECRET_C", "SECRET_D", "SECRET_E"]:
+            self.assertNotIn(secret, redacted)
+        self.assertIn("Schema denied", redacted)
+        self.assertLessEqual(len(redact_error_detail("x" * 2000)), 1200)
 
 
 if __name__ == "__main__":

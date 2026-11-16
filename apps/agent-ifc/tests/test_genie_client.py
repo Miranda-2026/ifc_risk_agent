@@ -63,24 +63,53 @@ def make_result(rows=None, total_row_count=None):
     }
 
 
+class FakeWait:
+    """Match SDK callback ordering, including the final FAILED poll."""
+
+    def __init__(self, message, calls, plan=None):
+        self.message = message
+        self.calls = calls
+        self.plan = plan or {}
+        value = message if isinstance(message, dict) else message.as_dict()
+        initial = self.plan.get("initial", {
+            "conversation_id": value.get("conversation_id"),
+            "message_id": value.get("message_id") or value.get("id"),
+        })
+        self.response = SDKObject(initial)
+
+    def result(self, *, timeout, callback=None):
+        self.calls.append(("wait", timeout, callable(callback)))
+        for update in self.plan.get("updates", []):
+            if callback:
+                callback(SDKObject(update))
+        if self.plan.get("error"):
+            raise self.plan["error"]
+        return self.message
+
+
 class FakeGenie:
     """The SDK surface is synchronous, including calls from asyncio.to_thread."""
 
-    def __init__(self, messages=None, result=None):
+    def __init__(self, messages=None, result=None, wait_plans=None):
         self.messages = list(messages or [make_message()])
         self.result = make_result() if result is None else result
         self.calls = []
         self.start_error = None
+        self.wait_plans = list(wait_plans or [])
 
-    def start_conversation_and_wait(self, space_id, content, *, timeout):
-        self.calls.append(("start", space_id, content, timeout))
+    def start_conversation(self, space_id, content):
+        self.calls.append(("start", space_id, content))
         if self.start_error:
             raise self.start_error
-        return self.messages.pop(0)
+        return self._next_waiter()
 
-    def create_message_and_wait(self, space_id, conversation_id, content, *, timeout):
-        self.calls.append(("followup", space_id, conversation_id, content, timeout))
-        return self.messages.pop(0)
+    def create_message(self, space_id, conversation_id, content):
+        self.calls.append(("followup", space_id, conversation_id, content))
+        return self._next_waiter()
+
+    def _next_waiter(self):
+        plan = self.wait_plans.pop(0) if self.wait_plans else None
+        return FakeWait(self.messages.pop(0), self.calls, plan)
 
     def get_message_attachment_query_result(self, space_id, conversation_id, message_id, attachment_id):
         self.calls.append(("result", space_id, conversation_id, message_id, attachment_id))
@@ -117,8 +146,9 @@ class GenieConversationTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(query["truncated"])
         self.assertTrue(query["data_available"])
         self.assertEqual(query["status"], "SUCCEEDED")
-        self.assertEqual(genie.calls[0], ("start", "space-123", "Show the client metrics", timedelta(seconds=240)))
-        self.assertEqual(genie.calls[1], ("result", "space-123", "conversation-A", "message-1", "query-1"))
+        self.assertEqual(genie.calls[0], ("start", "space-123", "Show the client metrics"))
+        self.assertEqual(genie.calls[1], ("wait", timedelta(seconds=240), True))
+        self.assertEqual(genie.calls[2], ("result", "space-123", "conversation-A", "message-1", "query-1"))
 
     async def test_accepts_sdk_as_dict_responses(self):
         conversation, _ = self.make_conversation(FakeGenie(
@@ -136,9 +166,12 @@ class GenieConversationTest(unittest.IsolatedAsyncioTestCase):
 
         followup = next(call for call in genie.calls if call[0] == "followup")
         self.assertEqual(followup, (
-            "followup", "space-123", "conversation-A", "Explain that result", timedelta(seconds=240)
+            "followup", "space-123", "conversation-A", "Explain that result"
         ))
         self.assertEqual(sum(call[0] == "start" for call in genie.calls), 1)
+        self.assertEqual([call for call in genie.calls if call[0] == "wait"], [
+            ("wait", timedelta(seconds=240), True), ("wait", timedelta(seconds=240), True)
+        ])
 
     async def test_separate_conversations_do_not_share_ids(self):
         genie = FakeGenie(messages=[
@@ -222,12 +255,127 @@ class GenieConversationTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_message_failure_does_not_fetch_query_evidence(self):
         conversation, genie = self.make_conversation(FakeGenie([
-            make_message(status="FAILED", error={"message": "Warehouse unavailable"})
+            make_message(status="FAILED", error={
+                "type": "WAREHOUSE_ACCESS_MISSING_EXCEPTION", "error": "Private warehouse failure"
+            })
         ]))
         answer = await conversation.ask("Show metrics")
         self.assertEqual(answer["status"], "FAILED")
         self.assertFalse(answer["has_verified_sql"])
         self.assertFalse(any(call[0] == "result" for call in genie.calls))
+
+    async def test_failed_poll_retains_category_and_initial_identifiers(self):
+        failed = make_message(status="FAILED", error={
+            "type": "WAREHOUSE_ACCESS_MISSING_EXCEPTION", "error": "PRIVATE_WAREHOUSE_DETAIL"
+        })
+        failed.pop("conversation_id")
+        failed.pop("message_id")
+        genie = FakeGenie(wait_plans=[{
+            "initial": {"conversation_id": "created-conversation", "message_id": "created-message"},
+            "updates": [failed],
+            "error": RuntimeError("failed to reach COMPLETED, got MessageStatus.FAILED"),
+        }])
+        conversation, _ = self.make_conversation(genie)
+        answer = await conversation.ask("Show metrics")
+        self.assertEqual(answer["status"], "FAILED")
+        self.assertEqual(answer["error"], "GENIE/WAREHOUSE_ACCESS_MISSING_EXCEPTION")
+        self.assertEqual(answer["genie_error_type"], "WAREHOUSE_ACCESS_MISSING_EXCEPTION")
+        self.assertEqual(answer["conversation_id"], "created-conversation")
+        self.assertEqual(answer["message_id"], "created-message")
+        self.assertIn("warehouse", answer["message"].lower())
+        self.assertFalse(answer["has_verified_sql"])
+        self.assertEqual(answer["queries"], [])
+        self.assertNotIn("PRIVATE_WAREHOUSE_DETAIL", json.dumps(answer))
+
+    async def test_unknown_failed_detail_is_not_leaked(self):
+        failed = make_message(status="FAILED", error={
+            "type": "UNKNOWN_PRIVATE_ERROR_TYPE", "error": "SECRET_ACCESS_TOKEN=abc123"
+        })
+        genie = FakeGenie(wait_plans=[{
+            "updates": [failed], "error": RuntimeError("Generic SDK failure")
+        }])
+        conversation, _ = self.make_conversation(genie)
+        with self.assertLogs("agent_server.genie_client", level="WARNING") as logs:
+            answer = await conversation.ask("Show metrics")
+        self.assertEqual(answer["error"], "GENIE_QUERY_FAILED")
+        self.assertFalse(answer["has_verified_sql"])
+        self.assertNotIn("SECRET_ACCESS_TOKEN", json.dumps(answer))
+        self.assertNotIn("UNKNOWN_PRIVATE_ERROR_TYPE", json.dumps(answer))
+        self.assertNotIn("abc123", "\n".join(logs.output))
+        self.assertIn("[REDACTED]", "\n".join(logs.output))
+
+    async def test_followup_failed_poll_preserves_its_message_id(self):
+        failed = make_message(message_id="message-2", status="FAILED", error={
+            "type": "COULD_NOT_GET_UC_SCHEMA_EXCEPTION", "error": "PRIVATE_SCHEMA_DETAIL"
+        })
+        genie = FakeGenie(messages=[make_message(), make_message(message_id="message-2")], wait_plans=[
+            {}, {"updates": [failed], "error": RuntimeError("SDK operation failed")}
+        ])
+        conversation, _ = self.make_conversation(genie)
+        await conversation.ask("Initial metrics")
+        answer = await conversation.ask("Explain these figures")
+        self.assertEqual(answer["error"], "GENIE/COULD_NOT_GET_UC_SCHEMA_EXCEPTION")
+        self.assertEqual(answer["message_id"], "message-2")
+        self.assertEqual(answer["conversation_id"], "conversation-A")
+        self.assertIn("schema", answer["message"].lower())
+        self.assertFalse(answer["has_verified_sql"])
+
+    async def test_sql_failure_is_reported_as_sql_execution(self):
+        failed = make_message(status="FAILED", error={
+            "type": "SQL_EXECUTION_EXCEPTION", "error": "PRIVATE_SQL_DETAIL"
+        })
+        conversation, _ = self.make_conversation(FakeGenie(wait_plans=[{
+            "updates": [failed], "error": RuntimeError("SDK operation failed")
+        }]))
+        answer = await conversation.ask("Calculate rankings")
+        self.assertEqual(answer["error"], "GENIE/SQL_EXECUTION_EXCEPTION")
+        self.assertIn("sql", answer["message"].lower())
+        self.assertNotIn("PRIVATE_SQL_DETAIL", json.dumps(answer))
+
+    async def test_transport_error_after_pending_poll_propagates(self):
+        conversation, _ = self.make_conversation(FakeGenie(wait_plans=[{
+            "updates": [make_message(status="FETCHING_METADATA")],
+            "error": RuntimeError("Connection was interrupted"),
+        }]))
+        with self.assertRaisesRegex(RuntimeError, "Connection was interrupted"):
+            await conversation.ask("Show metrics")
+
+    async def test_wait_timeout_remains_a_timeout(self):
+        conversation, _ = self.make_conversation(FakeGenie(wait_plans=[{
+            "updates": [make_message(status="PENDING_WAREHOUSE")],
+            "error": TimeoutError("Timed out waiting for Genie"),
+        }]))
+        with self.assertRaises(TimeoutError):
+            await conversation.ask("Show metrics")
+
+    async def test_cancelled_and_expired_polls_return_without_waiting_for_timeout(self):
+        for status in ("CANCELLED", "QUERY_RESULT_EXPIRED"):
+            with self.subTest(status=status):
+                genie = FakeGenie(wait_plans=[{
+                    "updates": [make_message(status=status)],
+                    "error": TimeoutError("The waiter would otherwise continue polling"),
+                }])
+                conversation, _ = self.make_conversation(genie)
+                answer = await conversation.ask("Show metrics")
+                self.assertEqual(answer["status"], status)
+                self.assertFalse(answer["has_verified_sql"])
+                self.assertEqual(answer["queries"], [])
+                self.assertFalse(any(call[0] == "result" for call in genie.calls))
+
+    async def test_initial_ids_are_retained_when_completed_message_omits_them(self):
+        message = make_message()
+        message.pop("conversation_id")
+        message.pop("message_id")
+        genie = FakeGenie(messages=[message], wait_plans=[{
+            "initial": {"conversation_id": "created-conversation", "message_id": "created-message"}
+        }])
+        conversation, _ = self.make_conversation(genie)
+        answer = await conversation.ask("Show metrics")
+        self.assertEqual(answer["conversation_id"], "created-conversation")
+        self.assertEqual(answer["message_id"], "created-message")
+        self.assertTrue(answer["has_verified_sql"])
+        self.assertEqual(next(call for call in genie.calls if call[0] == "result"),
+                         ("result", "space-123", "created-conversation", "created-message", "query-1"))
 
     async def test_legacy_message_id_is_supported(self):
         message = make_message()
@@ -277,11 +425,11 @@ class GenieConversationTest(unittest.IsolatedAsyncioTestCase):
         release = threading.Event()
 
         class BlockingGenie(FakeGenie):
-            def start_conversation_and_wait(self, space_id, content, *, timeout):
+            def start_conversation(self, space_id, content):
                 started.set()
                 if not release.wait(timeout=2):
                     raise TimeoutError("Test did not release the first SDK call")
-                return super().start_conversation_and_wait(space_id, content, timeout=timeout)
+                return super().start_conversation(space_id, content)
 
         genie = BlockingGenie(messages=[make_message(), make_message(message_id="message-2")])
         conversation, _ = self.make_conversation(genie)
@@ -293,7 +441,7 @@ class GenieConversationTest(unittest.IsolatedAsyncioTestCase):
         finally:
             release.set()
         await asyncio.gather(first, second)
-        operations = [call[0] for call in genie.calls if call[0] != "result"]
+        operations = [call[0] for call in genie.calls if call[0] in {"start", "followup"}]
         self.assertEqual(operations, ["start", "followup"])
         self.assertEqual(next(call for call in genie.calls if call[0] == "followup")[2], "conversation-A")
 

@@ -1,12 +1,52 @@
 """Safe connection diagnostics. Never send raw credentials or exception text to a model."""
 
 from dataclasses import dataclass
+import re
 
 
 @dataclass(frozen=True)
 class ConnectionIssue:
     code: str
     message: str
+
+
+_GENIE_MESSAGES = {
+    "COULD_NOT_GET_UC_SCHEMA_EXCEPTION": "Genie could not read the Unity Catalog schema. Check the App service principal's USE CATALOG, USE SCHEMA and SELECT permissions and the tables configured in Genie.",
+    "WAREHOUSE_ACCESS_MISSING_EXCEPTION": "Genie could not access its SQL warehouse. Grant the App service principal Can use on the warehouse selected in the Genie Agent's Settings.",
+    "WAREHOUSE_NOT_FOUND_EXCEPTION": "The SQL warehouse configured for Genie was not found. Check the warehouse selection in the Genie Agent's Settings.",
+    "SQL_EXECUTION_EXCEPTION": "Genie reached SQL execution, but the query failed. Inspect the detailed Genie error in App Logs; this status alone does not prove a connection or permissions problem.",
+    "TABLES_MISSING_EXCEPTION": "Genie reported missing source tables. Check the tables configured in the Genie Agent and whether the App identity can read them.",
+    "NO_TABLES_TO_QUERY_EXCEPTION": "Genie has no available tables to query. Check the configured tables and the App identity's data access.",
+    "DESCRIBE_QUERY_INVALID_SQL_ERROR": "Genie generated a query that could not be described. Inspect the SQL error in App Logs before changing connection settings.",
+    "INVALID_SQL_UNKNOWN_TABLE_EXCEPTION": "Genie's generated SQL references an unknown table. Check its table configuration and SQL details in App Logs.",
+    "REPLY_PROCESS_TIMEOUT_EXCEPTION": "Genie timed out while processing the question. Retry a narrower query and check the configured warehouse.",
+    "CHAT_COMPLETION_CLIENT_TIMEOUT_EXCEPTION": "Genie's model call timed out. Retry a narrower question.",
+    "DESCRIBE_QUERY_TIMEOUT": "Genie timed out while describing the query. Check the SQL warehouse and retry.",
+    "RATE_LIMIT_EXCEEDED_GENERIC_EXCEPTION": "Genie rate-limited the request. Please retry later.",
+    "RATE_LIMIT_EXCEEDED_SPECIFIED_WAIT_EXCEPTION": "Genie rate-limited the request. Please retry later.",
+}
+
+
+def classify_genie_message_error(error_type, status="FAILED") -> ConnectionIssue:
+    """Use Genie's explicit enum; never infer access failures from FAILED alone."""
+    if isinstance(error_type, str) and error_type in _GENIE_MESSAGES:
+        return ConnectionIssue("GENIE/" + error_type, _GENIE_MESSAGES[error_type])
+    if status == "CANCELLED":
+        return ConnectionIssue("GENIE_CANCELLED", "The Genie request was cancelled; it returned no verified query result.")
+    if status == "QUERY_RESULT_EXPIRED":
+        return ConnectionIssue("GENIE_RESULT_EXPIRED", "The Genie query result expired. Request a fresh query result.")
+    return ConnectionIssue("GENIE_QUERY_FAILED", "Genie accepted the request but could not complete it. The cause is not yet identified. Inspect the Genie error details in App Logs; do not infer that the database is disconnected or that permissions are missing.")
+
+
+def redact_error_detail(value) -> str:
+    """Retain a bounded server-side failure reason without credential/config dumps."""
+    if not isinstance(value, str):
+        return "No detailed reason was supplied by Genie."
+    value = re.split(r"\bConfig:\s*", value, maxsplit=1, flags=re.IGNORECASE)[0]
+    value = re.sub(r"https?://[^\s<>]+", "[URL omitted]", value)
+    value = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer [REDACTED]", value)
+    value = re.sub(r'''(?ix)(["']?(?:[a-z_]*token|[a-z_]*secret|password|authorization|api[_-]?key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)''', r"\1[REDACTED]", value)
+    return value.replace("\r", " ").replace("\n", " ")[:1200]
 
 
 _MESSAGES = {

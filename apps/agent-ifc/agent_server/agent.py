@@ -51,7 +51,7 @@ def create_agent(portfolio_tool=None, request=None) -> Agent:
     instructions = ANALYST_PROMPT + "\n\n" + CARD_INSTRUCTIONS
     instructions += "\nLatest UI scoring weights (percent): " + json.dumps(weights)
     instructions += "\nUI mode: " + str(settings.get("ui_mode", "chat"))
-    instructions += "\nUse query_ifc_portfolio to obtain real SQL and results through the native Genie Conversation API. If a tool returns an error, unavailable data, or truncated rows, do not invent values or rank clients from that partial population. Request an SQL aggregation/ranking over the full eligible population and return only the needed summary rows."
+    instructions += "\nUse query_ifc_portfolio to obtain real SQL and results through the native Genie Conversation API. If a tool returns an error, unavailable data, or truncated rows, do not invent values or rank clients from that partial population. Request an SQL aggregation/ranking over the full eligible population and return only the needed summary rows. Report returned error codes faithfully. A Genie FAILED status means the request reached Genie; without a specific error, do not claim the database is disconnected or that access is denied. Acknowledge that the cause is unknown and retain the conversation/message IDs for troubleshooting."
     return Agent(
         name="IFC Investment Intelligence",
         instructions=instructions,

@@ -5,7 +5,17 @@ Only allowlisted evidence is returned; signed external download links stay priva
 """
 
 import asyncio
+import logging
 from datetime import timedelta
+
+from agent_server.connection_errors import classify_genie_message_error, redact_error_detail
+
+logger = logging.getLogger(__name__)
+_TERMINAL_FAILURES = {"FAILED", "CANCELLED", "QUERY_RESULT_EXPIRED"}
+
+
+class _TerminalMessage(Exception):
+    """Stop the SDK waiter promptly for cancelled or expired requests."""
 
 
 def _as_dict(value):
@@ -34,14 +44,33 @@ class GenieConversation:
             return await asyncio.to_thread(self._ask_sync, question)
 
     def _ask_sync(self, question):
-        arguments = dict(space_id=self.space_id, content=question, timeout=self.timeout)
+        arguments = dict(space_id=self.space_id, content=question)
         if self.conversation_id is None:
-            message = self.client.genie.start_conversation_and_wait(**arguments)
+            waiter = self.client.genie.start_conversation(**arguments)
         else:
-            message = self.client.genie.create_message_and_wait(
+            waiter = self.client.genie.create_message(
                 conversation_id=self.conversation_id, **arguments
             )
-        message = _as_dict(message)
+        initial = _as_dict(getattr(waiter, "response", None))
+        latest = None
+
+        def capture(message):
+            nonlocal latest
+            latest = _as_dict(message)
+            # The SDK itself raises immediately for FAILED, but otherwise polls
+            # cancelled/expired messages until timeout. Preserve all three.
+            if latest.get("status") in {"CANCELLED", "QUERY_RESULT_EXPIRED"}:
+                raise _TerminalMessage()
+
+        try:
+            message = _as_dict(waiter.result(timeout=self.timeout, callback=capture))
+        except Exception:
+            # SDK OperationFailed contains only the terminal status. Its callback
+            # runs first and retains the useful GenieMessage.error payload.
+            if latest is None or latest.get("status") not in _TERMINAL_FAILURES:
+                raise
+            message = latest
+        message = {**initial, **message}
         conversation_id = message.get("conversation_id") or self.conversation_id
         message_id = message.get("message_id") or message.get("id")
         if conversation_id:
@@ -55,7 +84,13 @@ class GenieConversation:
             "has_verified_sql": False,
         }
         if message.get("status") != "COMPLETED":
-            response["message"] = "Genie did not complete this request; no result should be used as portfolio evidence."
+            failure = message.get("error") or {}
+            issue = classify_genie_message_error(failure.get("type"), message.get("status"))
+            response["error"] = issue.code
+            response["genie_error_type"] = issue.code.removeprefix("GENIE/") if issue.code.startswith("GENIE/") else "UNKNOWN"
+            response["message"] = issue.message
+            logger.warning("IFC Genie message failed [%s] conversation_id=%s message_id=%s detail=%s",
+                           issue.code, conversation_id, message_id, redact_error_detail(failure.get("error")))
             return response
         for attachment in message.get("attachments") or []:
             text = attachment.get("text") or {}

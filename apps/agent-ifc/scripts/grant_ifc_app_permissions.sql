@@ -27,3 +27,13 @@ TO `54d0cdaf-97ac-450b-9f91-91d28523704a`;
 -- For complete MLflow UC tracing, check the experiment's configured trace table
 -- location and grant SELECT, MODIFY on each actual annotations/logs/metrics/spans
 -- table it uses. Do not grant broad schema-wide write privileges.
+
+-- Verify the grants target the App identity, rather than your personal user.
+SHOW GRANTS `54d0cdaf-97ac-450b-9f91-91d28523704a`
+ON SCHEMA workspace.ifc_case_comp;
+
+SHOW GRANTS `54d0cdaf-97ac-450b-9f91-91d28523704a`
+ON TABLE workspace.ifc_case_comp.project_whole;
+
+SHOW GRANTS `54d0cdaf-97ac-450b-9f91-91d28523704a`
+ON TABLE workspace.ifc_case_comp.Project_otel_spans;
