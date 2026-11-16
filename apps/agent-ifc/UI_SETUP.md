@@ -29,8 +29,14 @@ The workspace and Genie Agent supplied for this project are prefilled:
 
 - Workspace: `https://dbc-3e5b0d11-f3e0.cloud.databricks.com`
 - Genie Space ID: `01f1ddf25d881906b7234f566362469b`
-- Server-side MCP endpoint:
-  `https://dbc-3e5b0d11-f3e0.cloud.databricks.com/api/2.0/mcp/genie/01f1ddf25d881906b7234f566362469b`
+- Connection: native Databricks SDK Genie Conversation API
+  (`/api/2.0/genie/spaces/...`), not the managed MCP endpoint.
+
+The native connection does not require the workspace's **Managed MCP Servers**
+Public Preview feature. The previous MCP connection failed because this feature
+is disabled in the workspace. The app now obtains real SQL and inline result rows
+through the native API. It flags truncated/missing results and never sends signed
+download URLs to the model. Each HTTP request owns an isolated Genie conversation.
 
 The Space ID is the segment after `/genie/rooms/` in the supplied URL. The `o`
 query parameter identifies the workspace, not the Genie Space. This is a Genie
@@ -53,13 +59,41 @@ connection; it does not configure the Dashboard view.
 6. Keep the model endpoint and its `CAN_QUERY` resource consistent. The bundle's
    `llm_endpoint` variable controls both; local runs use `IFC_MODEL_ENDPOINT`.
 
-Credentials stay on the server. MCP tools run with the app's service identity
+Credentials stay on the server. Genie queries run with the app's service identity
 when deployed; no Databricks access token is exposed to the frontend. The UI does
 not modify the Genie Agent or recreate any tables.
 
-If the Genie connection is missing or cannot list its tools, the app returns an
-explicit connection message and does not manufacture recommendations. News rows
+If the Genie access check or a query fails, the app returns a safe diagnostic code
+and logs the underlying exception. It does not manufacture recommendations. News rows
 are research evidence, not automatically a live web search or verified source.
+
+## Permissions for the existing agent-ifc App
+
+For **web UI > From Git** deployment, `databricks.yml` resource declarations are
+not applied by the Bundle CLI. Set permissions on the existing App itself:
+
+1. Open **agent-ifc > Settings > Resources**.
+2. Add the existing **Genie Agent** with **Can run**.
+3. Add each of the three source tables above as **Unity Catalog table** resources
+   with **Select**. Ensure the app identity can use the Genie SQL warehouse.
+4. For the trace error in the supplied log, add the confirmed table
+   `workspace.ifc_case_comp.Project_otel_spans` with **Modify**. App table resources
+   also grant the relevant parent catalog/schema usage privileges. Check the
+   MLflow experiment's configured trace location and add any other actual trace
+   tables it uses (annotations, logs, metrics); do not assume their names.
+5. The MLflow experiment resource should allow **Can edit** (or the existing
+   higher permission). Redeploy the updated `main` source from `apps/agent-ifc`.
+
+The alternative owner/admin SQL is in `scripts/grant_ifc_app_permissions.sql`.
+It targets the existing app client ID `54d0cdaf-97ac-450b-9f91-91d28523704a` and is
+not run automatically. A human user's `databricks auth login` does not grant access
+to the App's separate service principal. The trace permission failure is separate
+from the disabled MCP feature; disabling traces would hide the audit trail rather
+than fix either connection.
+
+References: [native Genie API](https://docs.databricks.com/aws/en/genie-agents/conversation-api),
+[Genie App resources](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/genie),
+[MLflow App resources](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/mlflow).
 
 ## Connect a dashboard later
 

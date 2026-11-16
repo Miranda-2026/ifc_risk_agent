@@ -1,7 +1,7 @@
 import logging
 import json
 import os
-from contextlib import AsyncExitStack
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator
@@ -12,7 +12,6 @@ from agents import Agent, Runner, function_tool, set_default_openai_api, set_def
 from agents.tracing import set_trace_processors
 from databricks.sdk import WorkspaceClient
 from databricks_openai import AsyncDatabricksOpenAI
-from databricks_openai.agents import McpServer
 from mlflow.genai.agent_server import invoke, stream
 from mlflow.types.responses import (
     ResponsesAgentRequest,
@@ -21,11 +20,11 @@ from mlflow.types.responses import (
 )
 
 from agent_server.history import normalize_history_items
+from agent_server.connection_errors import classify_connection_error
+from agent_server.genie_client import GenieConversation
 from agent_server.ui_contract import CARD_INSTRUCTIONS, normalize_weights
 from agent_server.utils import (
-    build_mcp_url,
     get_session_id,
-    get_user_workspace_client,
     process_agent_stream_events,
 )
 
@@ -46,72 +45,51 @@ def get_current_time() -> str:
     return datetime.now().isoformat()
 
 
-async def init_mcp_server(workspace_client: WorkspaceClient):
-    return McpServer(
-        url=build_mcp_url("/api/2.0/mcp/functions/system/ai", workspace_client=workspace_client),
-        name="system.ai UC function MCP server",
-        workspace_client=workspace_client,
-    )
-
-
-async def connect_healthy_mcp_servers(
-    stack: AsyncExitStack, servers: list[McpServer]
-) -> tuple[list[McpServer], list[str]]:
-    """Connect each MCP server and verify it can actually list its tools.
-
-    The Agents SDK lists each server's tools lazily inside ``Runner.run``, so a server that
-    connects but fails at list time (e.g. an unauthorized Genie space) would otherwise crash
-    the whole request — including unrelated turns. We list tools here, per server: healthy
-    servers are kept; any that fails to connect OR to list is dropped and its name returned,
-    so the agent runs with whatever is available instead of erroring out.
-
-    Returns (healthy_servers, unavailable_names).
-    """
-    healthy: list[McpServer] = []
-    unavailable: list[str] = []
-    for server in servers:
-        name = getattr(server, "name", "MCP server")
-        try:
-            connected = await stack.enter_async_context(server)
-            await connected.list_tools()  # forces the connectivity + authorization check now
-            healthy.append(connected)
-        except Exception:
-            logger.warning("MCP server %r unavailable; continuing without it.", name, exc_info=True)
-            unavailable.append(name)
-    return healthy, unavailable
-
-
-def create_agent(mcp_servers: list[McpServer] | None = None, request=None) -> Agent:
+def create_agent(portfolio_tool=None, request=None) -> Agent:
     settings = (request.custom_inputs or {}) if request else {}
     weights = normalize_weights(settings.get("weights"))
     instructions = ANALYST_PROMPT + "\n\n" + CARD_INSTRUCTIONS
     instructions += "\nLatest UI scoring weights (percent): " + json.dumps(weights)
     instructions += "\nUI mode: " + str(settings.get("ui_mode", "chat"))
+    instructions += "\nUse query_ifc_portfolio to obtain real SQL and results through the native Genie Conversation API. If a tool returns an error, unavailable data, or truncated rows, do not invent values or rank clients from that partial population. Request an SQL aggregation/ranking over the full eligible population and return only the needed summary rows."
     return Agent(
         name="IFC Investment Intelligence",
         instructions=instructions,
         model=os.getenv("IFC_MODEL_ENDPOINT", "databricks-gpt-oss-20b"),
-        tools=[get_current_time],
-        mcp_servers=mcp_servers or [],
+        tools=[get_current_time] + ([portfolio_tool] if portfolio_tool else []),
     )
 
 
-async def create_request_agent(stack, request):
-    """Connect the configured Genie before allowing portfolio recommendations."""
+async def create_request_agent(request):
+    """Use native Genie APIs; Managed MCP Servers preview is not required."""
     space_id = os.getenv("IFC_GENIE_SPACE_ID", "").strip()
     if not space_id:
         return None, "The portfolio data connection is not configured yet. Connect your IFC Genie Agent to enable quantitative analysis and client recommendations. No portfolio figures or recommendations have been generated."
-    client = WorkspaceClient()
-    server = McpServer(
-        url=build_mcp_url(f"/api/2.0/mcp/genie/{space_id}", workspace_client=client),
-        name="IFC portfolio Genie",
-        workspace_client=client,
-        timeout=300.0,
-    )
-    servers, unavailable = await connect_healthy_mcp_servers(stack, [server])
-    if unavailable:
-        return None, "The IFC portfolio data connection is currently unavailable. Please check the Genie Agent access and try again. I cannot calculate verified portfolio metrics or recommendations without that connection."
-    return create_agent(servers, request), None
+    try:
+        client = WorkspaceClient()
+        await asyncio.to_thread(client.genie.get_space, space_id=space_id)
+    except Exception as error:
+        issue = classify_connection_error(error)
+        logger.warning("IFC Genie access check failed [%s]: %s", issue.code, issue.message, exc_info=True)
+        return None, f"Genie connection failed [{issue.code}]. {issue.message}"
+    conversation = GenieConversation(client, space_id)
+
+    @function_tool
+    async def query_ifc_portfolio(question: str) -> str:
+        """Ask IFC Genie to query portfolio, news or industry tables with SQL.
+
+        Request explicit SQL calculations and the resulting rows. Check returned
+        query completeness before using the data for comparisons or rankings.
+        """
+        try:
+            evidence = await conversation.ask(question)
+        except Exception as error:
+            issue = classify_connection_error(error)
+            logger.warning("IFC Genie query failed [%s]: %s", issue.code, issue.message, exc_info=True)
+            evidence = {"error": issue.code, "message": issue.message, "has_verified_sql": False}
+        return json.dumps(evidence, ensure_ascii=False)
+
+    return create_agent(query_ifc_portfolio, request), None
 
 
 def connection_message(text):
@@ -127,13 +105,12 @@ def connection_message(text):
 async def invoke_handler(request: ResponsesAgentRequest) -> ResponsesAgentResponse:
     if session_id := get_session_id(request):
         mlflow.update_current_trace(metadata={"mlflow.trace.session": session_id})
-    async with AsyncExitStack() as stack:
-        agent, error = await create_request_agent(stack, request)
-        if error:
-            return ResponsesAgentResponse(output=[connection_message(error)])
-        messages = normalize_history_items([i.model_dump() for i in request.input])
-        result = await Runner.run(agent, messages, max_turns=25)
-        return ResponsesAgentResponse(output=[item.to_input_item() for item in result.new_items])
+    agent, error = await create_request_agent(request)
+    if error:
+        return ResponsesAgentResponse(output=[connection_message(error)])
+    messages = normalize_history_items([i.model_dump() for i in request.input])
+    result = await Runner.run(agent, messages, max_turns=25)
+    return ResponsesAgentResponse(output=[item.to_input_item() for item in result.new_items])
 
 
 @stream()
@@ -142,13 +119,12 @@ async def stream_handler(
 ) -> AsyncGenerator[ResponsesAgentStreamEvent, None]:
     if session_id := get_session_id(request):
         mlflow.update_current_trace(metadata={"mlflow.trace.session": session_id})
-    async with AsyncExitStack() as stack:
-        agent, error = await create_request_agent(stack, request)
-        if error:
-            yield ResponsesAgentStreamEvent(type="response.output_item.done", item=connection_message(error))
-            return
-        messages = normalize_history_items([i.model_dump() for i in request.input])
-        result = Runner.run_streamed(agent, input=messages, max_turns=25)
+    agent, error = await create_request_agent(request)
+    if error:
+        yield ResponsesAgentStreamEvent(type="response.output_item.done", item=connection_message(error))
+        return
+    messages = normalize_history_items([i.model_dump() for i in request.input])
+    result = Runner.run_streamed(agent, input=messages, max_turns=25)
 
-        async for event in process_agent_stream_events(result.stream_events()):
-            yield event
+    async for event in process_agent_stream_events(result.stream_events()):
+        yield event

@@ -65,6 +65,30 @@ resources:
             space_id: ${var.genie_space_id}
             permission: 'CAN_RUN'
 
+        # Genie queries run as the app identity and still require data access.
+        - name: 'ifc-project-data'
+          uc_securable:
+            securable_full_name: workspace.ifc_case_comp.project_whole
+            securable_type: TABLE
+            permission: SELECT
+        - name: 'ifc-news-data'
+          uc_securable:
+            securable_full_name: workspace.ifc_case_comp.external_news
+            securable_type: TABLE
+            permission: SELECT
+        - name: 'ifc-industry-data'
+          uc_securable:
+            securable_full_name: workspace.ifc_case_comp.industry_reports
+            securable_type: TABLE
+            permission: SELECT
+        # This trace table is confirmed by the deployed app's error log. Other
+        # trace tables must be added only after checking the experiment location.
+        - name: 'ifc-trace-spans'
+          uc_securable:
+            securable_full_name: workspace.ifc_case_comp.Project_otel_spans
+            securable_type: TABLE
+            permission: MODIFY
+
 targets:
   dev:
     mode: development
