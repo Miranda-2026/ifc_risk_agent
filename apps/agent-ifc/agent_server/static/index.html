@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#153f35">
+  <title>IFC · Investment Intelligence</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23153f35'/%3E%3Ctext x='32' y='42' text-anchor='middle' fill='white' font-family='Georgia' font-size='28'%3Ei%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/ifc-assets/styles.css">
+  <script type="module" src="/ifc-assets/app.js"></script>
+</head>
+<body>
+  <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icon-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="icon-chart" viewBox="0 0 24 24"><path d="M4 3v17h17M8 15v-4m5 4V6m5 9V9"/></symbol>
+    <symbol id="icon-spark" viewBox="0 0 24 24"><path d="m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6L12 3Z"/></symbol>
+    <symbol id="icon-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="icon-chevron" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></symbol>
+  </svg>
+  <aside class="sidebar" aria-label="Application navigation">
+    <a class="brand" href="/" aria-label="IFC Investment Intelligence home"><span class="brand-mark">ifc<span>◦</span></span><span class="brand-sub">INVESTMENT<br>INTELLIGENCE</span></a>
+    <button id="new-chat" class="new-chat"><svg class="icon"><use href="#icon-plus"/></svg> New conversation <span>↗</span></button>
+    <p class="nav-label">WORKSPACE</p>
+    <nav>
+      <button class="nav-item active" data-mode="home"><svg class="icon"><use href="#icon-spark"/></svg> Intelligence assistant</button>
+      <button class="nav-item" data-mode="dashboard"><svg class="icon"><use href="#icon-grid"/></svg> Dashboard <span class="nav-dot"></span></button>
+      <button class="nav-item" data-mode="quantitative"><svg class="icon"><use href="#icon-chart"/></svg> Quantitative analysis</button>
+      <button class="nav-item" data-mode="recommendation"><svg class="icon"><use href="#icon-spark"/></svg> Recommendation</button>
+    </nav>
+    <div class="sidebar-note"><span class="note-mark">↗</span><p>Clarity for every<br>investment decision.</p><span>Portfolio evidence. Clear reasoning.</span></div>
+    <div class="sidebar-footer"><span class="avatar">CF</span><div><strong>CFO Office</strong><small>Investment workspace</small></div><span class="footer-dot"></span></div>
+  </aside>
+  <div class="main-shell">
+    <header class="topbar"><div><span class="breadcrumb">Workspace</span><span class="slash">/</span><span id="page-title">Intelligence assistant</span></div><span class="workspace-tag"><span></span> IFC portfolio</span><button id="mobile-new-chat" class="mobile-new-chat" aria-label="New conversation"><svg class="icon"><use href="#icon-plus"/></svg></button></header>
+    <main id="main" tabindex="-1">
+      <div id="preview-notice" class="preview-notice" hidden>UI preview · Connect the application to Genie to use portfolio data.</div>
+      <section id="welcome" class="welcome" aria-labelledby="greeting">
+        <div class="eyebrow"><span></span> YOUR INVESTMENT INTELLIGENCE PARTNER</div>
+        <div class="assistant-emblem"><svg class="icon"><use href="#icon-spark"/></svg></div>
+        <h1 id="greeting">Hi, how can I help<br>you today<span>?</span></h1>
+        <p class="welcome-copy">A clearer view of your portfolio.<br>Explore the numbers, understand the risks, and find your next move.</p>
+        <div class="option-grid">
+          <button class="option-card" data-mode="dashboard"><span class="option-icon"><svg class="icon"><use href="#icon-grid"/></svg></span><strong>Dashboard</strong><span>See the bigger picture.<br>Your portfolio, at a glance.</span><span class="option-bottom">Explore portfolio <svg class="icon"><use href="#icon-arrow"/></svg></span></button>
+          <button class="option-card" data-mode="quantitative"><span class="option-icon"><svg class="icon"><use href="#icon-chart"/></svg></span><strong>Quantitative analysis</strong><span>Go deeper into exposure,<br>performance, and risk.</span><span class="option-bottom">Explore the numbers <svg class="icon"><use href="#icon-arrow"/></svg></span></button>
+          <button class="option-card featured" data-mode="recommendation"><span class="option-icon"><svg class="icon"><use href="#icon-spark"/></svg></span><strong>Recommendation</strong><span>Know where to continue.<br>Know what to review.</span><span class="option-bottom">Find the next move <svg class="icon"><use href="#icon-arrow"/></svg></span></button>
+        </div>
+        <div class="welcome-footnote"><svg class="icon"><use href="#icon-globe"/></svg> Informed by portfolio data. Designed for human judgment.</div>
+      </section>
+      <section id="dashboard-view" class="dashboard-view" hidden aria-labelledby="dashboard-title">
+        <div class="section-heading"><div><p class="eyebrow">PORTFOLIO OVERVIEW</p><h1 id="dashboard-title">The bigger picture.</h1><p>Explore your IFC portfolio in one place.</p></div><a id="dashboard-external" class="secondary-button" target="_blank" rel="noopener noreferrer" hidden>Open in new tab ↗</a></div>
+        <div id="dashboard-placeholder" class="empty-dashboard"><span class="option-icon"><svg class="icon"><use href="#icon-grid"/></svg></span><h2>Your portfolio dashboard, coming soon.</h2><p>This space is ready for your dashboard.<br>Once connected, you can explore it right here.</p><button class="secondary-button" data-mode="home">Back to assistant <span>↗</span></button></div>
+        <iframe id="dashboard-frame" title="IFC portfolio dashboard" referrerpolicy="strict-origin-when-cross-origin" hidden></iframe>
+      </section>
+      <section id="conversation" class="conversation" hidden aria-label="Conversation">
+        <div class="conversation-heading"><p class="eyebrow" id="conversation-eyebrow">PORTFOLIO INTELLIGENCE</p><h1 id="conversation-title">Let’s explore your portfolio.</h1></div>
+        <details id="weights-panel" class="weights-panel" hidden>
+          <summary><span><svg class="icon"><use href="#icon-chart"/></svg> Scoring weights <small>Customize your analysis</small></span><svg class="icon"><use href="#icon-chevron"/></svg></summary>
+          <form id="weights-form"><p>Choose the importance of each factor. Weights are normalized to 100%.</p><div class="weight-grid"><label>Disbursed amount<span><input name="disbursed" type="number" value="25" min="0" max="1000000" step="any" required> %</span></label><label>Internal risk<span><input name="risk" type="number" value="25" min="0" max="1000000" step="any" required> %</span></label><label>Environmental<span><input name="environmental" type="number" value="25" min="0" max="1000000" step="any" required> %</span></label><label>Product line<span><input name="product" type="number" value="25" min="0" max="1000000" step="any" required> %</span></label></div><div class="weights-footer"><span id="weights-summary">25% · 25% · 25% · 25%</span><button class="primary-button" type="submit">Apply & regenerate <span>↗</span></button></div><p id="weights-error" class="field-error" role="alert" hidden></p></form>
+        </details>
+        <div id="messages" aria-live="polite" aria-relevant="additions"></div>
+      </section>
+    </main>
+    <div id="composer-wrap" class="composer-wrap"><div id="request-status" class="request-status" role="status" hidden><span class="loading-dot"></span> <span id="request-status-text">Reviewing portfolio evidence…</span><button id="cancel-request" type="button">Stop</button></div><form id="chat-form" class="composer"><label class="sr-only" for="chat-input">Ask the investment intelligence assistant</label><textarea id="chat-input" rows="1" placeholder="Ask about your portfolio, a client, or a risk…" maxlength="16000"></textarea><button id="send-button" class="send-button" type="submit" aria-label="Send message"><svg class="icon"><use href="#icon-arrow"/></svg></button></form><p class="composer-note">IFC Investment Intelligence <span>·</span> Recommendations support, and do not replace, investment judgment.</p></div>
+  </div>
+</body>
+</html>

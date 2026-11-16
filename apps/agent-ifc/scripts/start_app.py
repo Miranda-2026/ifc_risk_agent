@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Start script for running frontend and backend processes concurrently.
+Start the built-in IFC UI and backend in one server. --legacy-ui also starts
+the template's separately downloaded frontend.
 
 Requirements:
 1. Not reporting ready until BOTH frontend and backend processes are ready
@@ -52,7 +53,7 @@ def check_port_available(port: int) -> bool:
 
 
 class ProcessManager:
-    def __init__(self, port=8000, no_ui=False):
+    def __init__(self, port=8000, no_ui=True):
         self.backend_process = None
         self.frontend_process = None
         self.backend_ready = False
@@ -127,8 +128,8 @@ class ProcessManager:
 
                     if self.no_ui and self.backend_ready:
                         print("\n" + "=" * 50)
-                        print("✓ Backend is ready! (running without UI)")
-                        print(f"✓ API available at http://localhost:{self.port}")
+                        print("✓ IFC application is ready!")
+                        print(f"✓ UI and API available at http://localhost:{self.port}")
                         print("=" * 50 + "\n")
                     elif self.backend_ready and self.frontend_ready:
                         print("\n" + "=" * 50)
@@ -324,7 +325,12 @@ def main():
     parser.add_argument(
         "--no-ui",
         action="store_true",
-        help="Run backend only, skip frontend UI",
+        help="Compatibility alias: skip the legacy external frontend (the built-in IFC UI remains available)",
+    )
+    parser.add_argument(
+        "--legacy-ui",
+        action="store_true",
+        help="Also download and start the original external chat frontend on CHAT_APP_PORT",
     )
     args, backend_args = parser.parse_known_args()
 
@@ -338,7 +344,7 @@ def main():
                 pass
             break
 
-    sys.exit(ProcessManager(port=port, no_ui=args.no_ui).run(backend_args))
+    sys.exit(ProcessManager(port=port, no_ui=not args.legacy_ui or args.no_ui).run(backend_args))
 
 
 if __name__ == "__main__":

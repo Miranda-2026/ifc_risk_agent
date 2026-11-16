@@ -5,8 +5,8 @@ Quickstart setup script for Databricks agent development.
 NOTE: Keep this comment up to date when editing the script.
 
 Steps:
-  1. Check prerequisites — uv, Node.js (>=20.19/22.12/23), npm, Databricks CLI.
-     Exit if any are missing or Node version is unsupported by Vite.
+  1. Check prerequisites — uv and Databricks CLI. The built-in IFC UI needs no
+     Node.js; check Node/npm only in templates without that UI.
   2. Set up .env — copy .env.example → .env (or create a minimal one).
   3. Databricks auth — use --profile if provided, otherwise list existing profiles
      for interactive selection, or create a new DEFAULT profile with --host / prompt.
@@ -140,10 +140,10 @@ def check_prerequisites() -> dict[str, bool]:
 
     prereqs = {
         "uv": command_exists("uv"),
-        "node": command_exists("node"),
-        "npm": command_exists("npm"),
         "databricks": command_exists("databricks"),
     }
+    if not (Path(__file__).resolve().parents[1] / "agent_server/static/index.html").exists():
+        prereqs.update(node=command_exists("node"), npm=command_exists("npm"))
 
     for name, installed in prereqs.items():
         if installed:
@@ -172,7 +172,7 @@ def check_missing_prerequisites(prereqs: dict[str, bool]) -> list[str]:
     if not prereqs["uv"]:
         missing.append("uv - Install with: curl -LsSf https://astral.sh/uv/install.sh | sh")
 
-    if not prereqs["node"] or not prereqs["npm"]:
+    if "node" in prereqs and (not prereqs["node"] or not prereqs["npm"]):
         missing.append("Node.js 20 - Install with: nvm install 20 (or download from nodejs.org)")
 
     if not prereqs["databricks"]:
@@ -1391,8 +1391,8 @@ Examples:
             print("\nPlease install the missing prerequisites and run this script again.")
             sys.exit(1)
 
-        # Check Node.js version meets Vite requirements
-        node_error = check_node_version()
+        # Node is needed only for a template's separately downloaded frontend.
+        node_error = check_node_version() if "node" in prereqs else None
         if node_error:
             print_error(f"Node.js version check failed:\n  {node_error}")
             sys.exit(1)
@@ -1568,7 +1568,7 @@ Examples:
 
         print_header("Setup Complete!")
         summary = f"""
-✓ Prerequisites verified (uv, Node.js, Databricks CLI)
+✓ Prerequisites verified (uv, Databricks CLI; Node.js only for external frontend templates)
 ✓ Databricks authenticated with profile: {profile_name}
 ✓ Configuration files created (.env)
 

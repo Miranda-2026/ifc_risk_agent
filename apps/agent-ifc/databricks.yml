@@ -1,6 +1,20 @@
 bundle:
   name: agent_openai_agents_sdk
 
+workspace:
+  host: https://dbc-3e5b0d11-f3e0.cloud.databricks.com
+
+variables:
+  llm_endpoint:
+    default: "databricks-gpt-oss-20b"
+    description: "Model endpoint used by both the agent and its permission grant"
+  genie_space_id:
+    default: "01f1ddf25d881906b7234f566362469b"
+    description: "IFC Genie Space ID; override to use a different Genie Agent"
+  dashboard_url:
+    default: ""
+    description: "Optional HTTPS dashboard embed URL"
+
 resources:
   apps:
     agent_openai_agents_sdk:
@@ -22,6 +36,12 @@ resources:
             value: "300"
           - name: MLFLOW_EXPERIMENT_ID
             value_from: "experiment"
+          - name: IFC_MODEL_ENDPOINT
+            value: ${var.llm_endpoint}
+          - name: IFC_GENIE_SPACE_ID
+            value: ${var.genie_space_id}
+          - name: IFC_DASHBOARD_URL
+            value: ${var.dashboard_url}
 
       # Resources which this app has access to
       resources:
@@ -32,12 +52,18 @@ resources:
 
         # NOTE: grants the app's service principal CAN_QUERY on the LLM endpoint so
         # the deployed app (and UI-created apps via manifest.yaml) can call the model
-        # without a manual grant. If you change the model in agent_server/agent.py,
-        # update the name below to match.
+        # without a manual grant. llm_endpoint controls both this grant and the
+        # agent's IFC_MODEL_ENDPOINT environment variable.
         - name: 'llm-endpoint'
           serving_endpoint:
-            name: 'databricks-claude-sonnet-5-5'
+            name: ${var.llm_endpoint}
             permission: 'CAN_QUERY'
+
+        - name: 'ifc-genie'
+          genie_space:
+            name: 'IFC portfolio Genie'
+            space_id: ${var.genie_space_id}
+            permission: 'CAN_RUN'
 
 targets:
   dev:

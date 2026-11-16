@@ -1,5 +1,10 @@
 # Responses API Agent
 
+> **IFC UI:** This checkout includes a built-in welcome page, three navigation
+> options, and expandable client recommendation cards. Start with [UI_SETUP.md](UI_SETUP.md)
+> for Genie and dashboard configuration. `uv run start-app` now serves this UI
+> directly on port 8000; the external chat frontend below is optional legacy behavior.
+
 This template defines a conversational agent app. The app comes with a built-in chat UI, but also exposes an API endpoint for invoking the agent so that you can serve your UI elsewhere (e.g. on your website or in a mobile app).
 
 The agent in this template implements the [OpenAI Responses API](https://platform.openai.com/docs/api-reference/responses) interface. It ships with a sample `get_current_time` tool. The agent code includes commented-out examples showing how to connect to [Databricks MCP servers](https://docs.databricks.com/aws/en/generative-ai/agent-framework/agent-tool) (including the built-in code interpreter, Vector Search, Genie, and UC functions). You can customize agent code and test it via the API or UI.
